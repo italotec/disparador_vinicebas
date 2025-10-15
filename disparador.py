@@ -1,33 +1,29 @@
-import importlib
-import subprocess
-import sys
+import sys, subprocess, importlib
 
-def install_and_import(package, pypi_name=None):
-    """Try to import a package; if missing, install it via pip (user mode)."""
+def ensure_pip():
     try:
-        return importlib.import_module(package)
+        import pip  # noqa
     except ImportError:
-        print(f"📦 Instalando dependência: {package}…")
-        name = pypi_name or package
-        subprocess.check_call([
-            sys.executable, "-m", "pip", "install", "--user", "--quiet", name
-        ])
-        return importlib.import_module(package)
+        subprocess.check_call([sys.executable, "-m", "ensurepip", "--user"])
 
-# === auto-install section ===
+def install_and_import(pkg, pypi=None):
+    try:
+        return importlib.import_module(pkg)
+    except ImportError:
+        name = pypi or pkg
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--user", "--quiet", name])
+        return importlib.import_module(pkg)
+
+ensure_pip()
 ctk = install_and_import("customtkinter")
 pd = install_and_import("pandas")
 requests = install_and_import("requests")
 
-
-import customtkinter as ctk
 import tkinter as tk
 from tkinter import filedialog
 import threading
 import json
 import os
-import pandas as pd
-import requests
 import random
 import string
 import uuid
@@ -37,10 +33,7 @@ import time
 BM_FILE = 'bms.json'
 LOG_FILE = 'sent_log.csv'
 TEMPLATE_LANG = 'pt_BR'
-TOR_PROXY = {
-    "http": "socks5h://127.0.0.1:9050",
-    "https": "socks5h://127.0.0.1:9050"
-}
+TOR_PROXY = {"http": "socks5h://127.0.0.1:9050", "https": "socks5h://127.0.0.1:9050"}
 LOCK = threading.Lock()
 
 def random_namespace():
@@ -181,7 +174,8 @@ def modo_envio(bm_obj, csv_df, params_rows, random_mode=False, log_callback=None
     with open(LOG_FILE, "r", encoding='utf-8') as f:
         enviados = set(line.strip() for line in f)
     if 'telefone' not in csv_df.columns:
-        log_callback("❌ CSV precisa da coluna 'telefone'.")
+        if log_callback:
+            log_callback("❌ CSV precisa da coluna 'telefone'.")
         return
     leads_df = csv_df.copy()
     leads_df['telefone'] = leads_df['telefone'].astype(str)
@@ -189,12 +183,15 @@ def modo_envio(bm_obj, csv_df, params_rows, random_mode=False, log_callback=None
     if random_mode:
         leads_df = leads_df.sample(frac=1).reset_index(drop=True)
     if not templates:
-        log_callback("❌ Nenhum template cadastrado.")
+        if log_callback:
+            log_callback("❌ Nenhum template cadastrado na BM.")
         return
     num_templates = len(templates)
     total = len(leads_df)
     leads_df['template_name'] = [templates[i % num_templates] for i in range(total)]
-    log_callback(f"📤 Enviando para {total} leads…")
+    if log_callback:
+        log_callback(f"📤 Enviando para {total} leads…")
+        log_callback(f"📌 Namespace: {NAMESPACE_VALUE} | Param aleatório: {PARAM_NAME_VALUE}")
     with ThreadPoolExecutor(max_workers=1) as executor:
         for _, lead in leads_df.iterrows():
             executor.submit(enviar_template, lead, phone_number_id, token, params_rows, log_callback, not random_mode)
@@ -204,7 +201,7 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("WhatsApp Sender - Modo Escuro")
-        self.geometry("1100x690")
+        self.geometry("1100x720")
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-blue")
         self.bms = carregar_bms()
@@ -214,32 +211,51 @@ class App(ctk.CTk):
         self.csv_df = pd.DataFrame()
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(1, weight=1)
+
         self.sidebar = ctk.CTkFrame(self, width=260)
         self.sidebar.grid(row=0, column=0, rowspan=2, sticky="nsw")
+        self.sidebar.grid_propagate(False)
+
         ctk.CTkLabel(self.sidebar, text="⚙️ Configurações", font=("Segoe UI", 17, "bold")).pack(padx=14, pady=(14,8), anchor="w")
         ctk.CTkLabel(self.sidebar, text="Business Manager").pack(padx=14, pady=(6,2), anchor="w")
         self.bm_menu = ctk.CTkOptionMenu(self.sidebar, values=list(self.bms.keys()), command=self._select_bm)
         self.bm_menu.pack(padx=14, pady=6, fill="x")
-        ctk.CTkButton(self.sidebar, text="Cadastrar BM", command=self._cadastrar_bm).pack(padx=14, pady=(4,12), fill="x")
+        ctk.CTkButton(self.sidebar, text="Cadastrar/Editar BM", command=self._cadastrar_bm).pack(padx=14, pady=(4,12), fill="x")
         ctk.CTkButton(self.sidebar, text="Recarregar BMs", command=self._refresh_bms).pack(padx=14, pady=(0,18), fill="x")
-        ctk.CTkLabel(self.sidebar, text="Arquivo CSV").pack(padx=14, pady=(0,2), anchor="w")
-        ctk.CTkButton(self.sidebar, text="Selecionar CSV", command=self._pick_csv).pack(padx=14, pady=6, fill="x")
+
+        ctk.CTkLabel(self.sidebar, text="Arquivo CSV de Leads").pack(padx=14, pady=(0,2), anchor="w")
+        ctk.CTkButton(self.sidebar, text="Selecionar CSV…", command=self._pick_csv).pack(padx=14, pady=6, fill="x")
         self.csv_label = ctk.CTkLabel(self.sidebar, text="Nenhum arquivo selecionado", wraplength=220)
         self.csv_label.pack(padx=14, pady=(2,10), anchor="w")
+
         ctk.CTkButton(self.sidebar, text="Enviar (Normal)", command=lambda: self._start_envio(False)).pack(padx=14, pady=(8,6), fill="x")
-        ctk.CTkButton(self.sidebar, text="Enviar (Aleatório)", command=lambda: self._start_envio(True)).pack(padx=14, pady=(0,14), fill="x")
+        ctk.CTkButton(self.sidebar, text="Enviar (Aleatório, sem log)", command=lambda: self._start_envio(True)).pack(padx=14, pady=(0,14), fill="x")
+
+        self.topbar = ctk.CTkFrame(self)
+        self.topbar.grid(row=0, column=1, sticky="ew", padx=10, pady=(10,6))
+        self.topbar.grid_columnconfigure(1, weight=1)
+        self.ns_label = ctk.CTkLabel(self.topbar, text=f"Namespace: {NAMESPACE_VALUE}")
+        self.ns_label.grid(row=0, column=0, padx=(10,8), pady=8, sticky="w")
+        self.randp_label = ctk.CTkLabel(self.topbar, text=f"Random PARAM_NAME_VALUE: {PARAM_NAME_VALUE}")
+        self.randp_label.grid(row=0, column=2, padx=(8,10), pady=8, sticky="e")
+
         self.param_frame = ctk.CTkFrame(self)
         self.param_frame.grid(row=1, column=1, sticky="nsew", padx=10, pady=(0,10))
         self.param_frame.grid_columnconfigure(0, weight=1)
-        self.rows_container = ctk.CTkScrollableFrame(self.param_frame, height=280)
-        self.rows_container.grid(row=1, column=0, sticky="nsew", padx=10, pady=(10,10))
-        self.add_row_btn = ctk.CTkButton(self.param_frame, text="Adicionar parâmetro", command=self._add_param_row)
+        self.param_header = ctk.CTkLabel(self.param_frame, text="🧩 Mapeamento de Parâmetros (ordem importa)", font=("Segoe UI", 15, "bold"))
+        self.param_header.grid(row=0, column=0, sticky="w", padx=10, pady=(10,4))
+        self.rows_container = ctk.CTkScrollableFrame(self.param_frame, height=300)
+        self.rows_container.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0,10))
+        self.rows_container.grid_columnconfigure(0, weight=1)
+        self.add_row_btn = ctk.CTkButton(self.param_frame, text="➕ Adicionar parâmetro", command=self._add_param_row)
         self.add_row_btn.grid(row=2, column=0, sticky="w", padx=10, pady=(0,10))
-        self.example_btn = ctk.CTkButton(self.param_frame, text="Exemplo rápido", command=self._fill_example_rows)
-        self.example_btn.grid(row=2, column=0, sticky="e", padx=10, pady=(0,10))
+        self.quick_example_btn = ctk.CTkButton(self.param_frame, text="⚡ Exemplo rápido (nome/telefone/indicacao)", command=self._fill_example_rows)
+        self.quick_example_btn.grid(row=2, column=0, sticky="e", padx=10, pady=(0,10))
+
         self.log_box = ctk.CTkTextbox(self, wrap="word", height=180)
         self.log_box.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=10, pady=(0,10))
-        self._log("✅ Interface iniciada.")
+
+        self._log("✅ Interface iniciada. Selecione a BM, o CSV e configure os parâmetros.")
         self._add_param_row()
 
     def _select_bm(self, name):
@@ -250,44 +266,63 @@ class App(ctk.CTk):
     def _refresh_bms(self):
         self.bms = carregar_bms()
         self.bm_menu.configure(values=list(self.bms.keys()))
-        self._log("Lista de BMs atualizada.")
+        if self.selected_bm_name not in self.bms and self.bms:
+            first = list(self.bms.keys())[0]
+            self._select_bm(first)
+            self.bm_menu.set(first)
+        self._log("🔄 Lista de BMs atualizada.")
 
     def _cadastrar_bm(self):
         win = ctk.CTkToplevel(self)
-        win.title("Cadastrar BM")
-        win.geometry("400x350")
-        ctk.CTkLabel(win, text="Nome:").pack(pady=5)
-        nome = ctk.CTkEntry(win)
-        nome.pack(pady=5)
-        ctk.CTkLabel(win, text="Phone Number ID:").pack(pady=5)
-        phone = ctk.CTkEntry(win)
-        phone.pack(pady=5)
-        ctk.CTkLabel(win, text="Token:").pack(pady=5)
-        token = ctk.CTkEntry(win, show="*")
-        token.pack(pady=5)
-        ctk.CTkLabel(win, text="Templates (vírgula):").pack(pady=5)
-        temps = ctk.CTkEntry(win)
-        temps.pack(pady=5)
-        def salvar():
+        win.title("Cadastrar/Editar BM")
+        win.geometry("440x410")
+        win.grab_set()
+        ctk.CTkLabel(win, text="Nome (chave):").pack(pady=(14,4), anchor="w", padx=12)
+        name_e = ctk.CTkEntry(win)
+        name_e.pack(pady=4, padx=12, fill="x")
+        ctk.CTkLabel(win, text="Phone Number ID:").pack(pady=(10,4), anchor="w", padx=12)
+        phone_e = ctk.CTkEntry(win)
+        phone_e.pack(pady=4, padx=12, fill="x")
+        ctk.CTkLabel(win, text="Token:").pack(pady=(10,4), anchor="w", padx=12)
+        token_e = ctk.CTkEntry(win, show="*")
+        token_e.pack(pady=4, padx=12, fill="x")
+        ctk.CTkLabel(win, text="Templates (vírgula):").pack(pady=(10,4), anchor="w", padx=12)
+        temps_e = ctk.CTkEntry(win, placeholder_text="ex: aviso_1, aviso_2")
+        temps_e.pack(pady=4, padx=12, fill="x")
+
+        def save():
+            name = name_e.get().strip()
+            phone = phone_e.get().strip()
+            token = token_e.get().strip()
+            temps = [t.strip() for t in temps_e.get().split(",") if t.strip()]
+            if not (name and phone and token and temps):
+                self._log("❌ Preencha nome, phone, token e ao menos 1 template.")
+                return
             bms = carregar_bms()
-            bms[nome.get()] = {"phone_number_id": phone.get(), "token": token.get(), "templates": [t.strip() for t in temps.get().split(",")]}
+            bms[name] = {"phone_number_id": phone, "token": token, "templates": temps}
             salvar_bms(bms)
             self._refresh_bms()
+            self.bm_menu.set(name)
+            self._select_bm(name)
             win.destroy()
-            self._log(f"BM {nome.get()} salva.")
-        ctk.CTkButton(win, text="Salvar", command=salvar).pack(pady=15)
+            self._log(f"✅ BM '{name}' salva.")
+
+        ctk.CTkButton(win, text="Salvar", command=save).pack(pady=16, padx=12, fill="x")
 
     def _pick_csv(self):
-        path = filedialog.askopenfilename(title="Selecionar CSV", filetypes=[("CSV files", "*.csv")])
+        path = filedialog.askopenfilename(title="Selecionar CSV", filetypes=[("CSV files", "*.csv"), ("Todos os arquivos", "*.*")])
         if not path:
             return
         try:
             df = pd.read_csv(path)
             self.csv_df = df
+            self.csv_path = path
             self.csv_label.configure(text=os.path.basename(path))
-            self._log(f"CSV carregado: {path}")
+            self._refresh_rows_headers()
+            cols = ", ".join(list(df.columns)[:12])
+            self._log(f"📄 CSV carregado: {path}\n🧱 Colunas: {cols}{' ...' if len(df.columns) > 12 else ''}")
         except Exception as e:
-            self._log(f"Erro: {e}")
+            self._log(f"❌ Erro ao ler CSV: {e}")
 
     def _get_csv_headers(self):
         if self.csv_df is None or self.csv_df.empty:
@@ -299,10 +334,15 @@ class App(ctk.CTk):
         row.grid(sticky="ew", padx=6, pady=4)
         return row
 
+    def _refresh_rows_headers(self):
+        for child in self.rows_container.winfo_children():
+            if isinstance(child, ParamRow):
+                child.col_combo.configure(values=self._get_csv_headers())
+
     def _fill_example_rows(self):
-        for c in list(self.rows_container.winfo_children()):
-            if isinstance(c, ParamRow):
-                c.destroy()
+        for child in list(self.rows_container.winfo_children()):
+            if isinstance(child, ParamRow):
+                child.destroy()
         r1 = self._add_param_row()
         r1.use_random.set(True)
         r1._toggle_param_name()
@@ -319,18 +359,18 @@ class App(ctk.CTk):
         r3.source_menu.set("Literal")
         r3._switch_source()
         r3.literal_entry.insert(0, "serie")
-        self._log("Exemplo preenchido.")
+        self._log("⚡ Exemplo preenchido. Ajuste conforme seu CSV.")
 
     def _start_envio(self, random_mode):
         if not self.selected_bm_obj:
-            self._log("Selecione uma BM.")
+            self._log("❌ Selecione uma BM.")
             return
         if self.csv_df is None or self.csv_df.empty:
-            self._log("Selecione um CSV válido.")
+            self._log("❌ Selecione um CSV válido.")
             return
         rows = [w for w in self.rows_container.winfo_children() if isinstance(w, ParamRow)]
         if not rows:
-            self._log("Adicione ao menos um parâmetro.")
+            self._log("❌ Adicione ao menos um parâmetro.")
             return
         threading.Thread(target=modo_envio, args=(self.selected_bm_obj, self.csv_df, rows, random_mode, self._log), daemon=True).start()
 
