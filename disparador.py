@@ -1,4 +1,4 @@
-import os, sys, subprocess, shutil, urllib.request
+import os, sys, subprocess, shutil, urllib.request, time
 
 VENV_DIR = os.path.expanduser("~/Persistent/venvs/whatsapp_gui")
 
@@ -7,26 +7,60 @@ def em_venv():
 
 def tem_tk():
     try:
-        import tkinter
+        import tkinter  # noqa
         return True
     except Exception:
-        print("❌ Tkinter ausente. Instale: sudo apt install -y python3-tk")
+        print("❌ Tkinter ausente. Instale: sudo apt install -y python3-tk python3-venv python3.11-venv")
         return False
+
+def run(cmd, use_torsocks=False):
+    if use_torsocks and shutil.which("torsocks"):
+        cmd = ["torsocks", "-i"] + cmd
+    subprocess.check_call(cmd)
+
+def baixar(url, destino):
+    ok = False
+    if shutil.which("curl"):
+        try:
+            run(["curl", "-fsSL", url, "-o", destino], use_torsocks=True); ok = True
+        except Exception:
+            ok = False
+    if (not ok) and shutil.which("wget"):
+        try:
+            run(["wget", "-q", url, "-O", destino], use_torsocks=True); ok = True
+        except Exception:
+            ok = False
+    if not ok:
+        urllib.request.urlretrieve(url, destino)
 
 def instalar_pip(py_exe):
     try:
-        subprocess.check_call([py_exe, "-m", "ensurepip", "--upgrade", "--default-pip"])
+        run([py_exe, "-m", "ensurepip", "--upgrade", "--default-pip"])
         return
     except Exception:
         pass
-    url = "https://bootstrap.pypa.io/get-pip.py"
-    destino = "/tmp/get-pip.py"
-    urllib.request.urlretrieve(url, destino)
+    gp = "/tmp/get-pip.py"
+    baixar("https://bootstrap.pypa.io/get-pip.py", gp)
     try:
-        subprocess.check_call([py_exe, destino])
+        run([py_exe, gp])
     finally:
-        if os.path.exists(destino):
-            os.remove(destino)
+        if os.path.exists(gp):
+            os.remove(gp)
+
+def pip_install(pip_exe, pkgs):
+    env = os.environ.copy()
+    env.setdefault("PIP_DEFAULT_TIMEOUT", "180")
+    cmd = [pip_exe, "install", "--upgrade"] + list(pkgs)
+    if shutil.which("torsocks"):
+        cmd = ["torsocks", "-i"] + cmd
+    for tentativa in range(5):
+        try:
+            subprocess.check_call(cmd, env=env)
+            return
+        except subprocess.CalledProcessError:
+            if tentativa == 4:
+                raise
+            time.sleep(5 * (tentativa + 1))
 
 if not em_venv():
     if not tem_tk():
@@ -34,17 +68,17 @@ if not em_venv():
     py = shutil.which("python3") or sys.executable
     if not os.path.exists(VENV_DIR):
         try:
-            subprocess.check_call([py, "-m", "venv", VENV_DIR])
+            run([py, "-m", "venv", VENV_DIR])
         except subprocess.CalledProcessError:
-            subprocess.check_call([py, "-m", "venv", VENV_DIR, "--without-pip"])
+            run([py, "-m", "venv", VENV_DIR, "--without-pip"])
     vpy = os.path.join(VENV_DIR, "bin", "python")
     vpip = os.path.join(VENV_DIR, "bin", "pip")
     try:
-        subprocess.check_call([vpy, "-m", "pip", "--version"])
+        run([vpy, "-m", "pip", "--version"])
     except Exception:
         instalar_pip(vpy)
-    subprocess.check_call([vpy, "-m", "pip", "install", "--upgrade", "pip"])
-    subprocess.check_call([vpip, "install", "customtkinter", "pandas", "requests"])
+    run([vpy, "-m", "pip", "install", "--upgrade", "pip"])
+    pip_install(vpip, ["customtkinter", "pandas", "requests"])
     os.execv(vpy, [vpy] + sys.argv)
 
 import customtkinter as ctk
