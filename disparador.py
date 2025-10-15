@@ -215,7 +215,7 @@ def enviar_template(lead, phone_number_id, token, body_rows, link_rows,
         "type": "template",
         "messaging_product": "whatsapp",
         "template": {
-            "namespace": NAMESPACE_VALUE,
+            #"namespace": NAMESPACE_VALUE,
             "name": template_name,
             "language": {"code": TEMPLATE_LANG},
             "components": components
