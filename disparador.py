@@ -1,3 +1,25 @@
+import importlib
+import subprocess
+import sys
+
+def install_and_import(package, pypi_name=None):
+    """Try to import a package; if missing, install it via pip (user mode)."""
+    try:
+        return importlib.import_module(package)
+    except ImportError:
+        print(f"📦 Instalando dependência: {package}…")
+        name = pypi_name or package
+        subprocess.check_call([
+            sys.executable, "-m", "pip", "install", "--user", "--quiet", name
+        ])
+        return importlib.import_module(package)
+
+# === auto-install section ===
+ctk = install_and_import("customtkinter")
+pd = install_and_import("pandas")
+requests = install_and_import("requests")
+
+
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import filedialog
