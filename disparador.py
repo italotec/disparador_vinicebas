@@ -261,7 +261,7 @@ class ScrollableFrame(ttk.Frame):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("WhatsApp Sender (Tkinter)")
+        self.title("Sender do Vini")
         self.geometry("1100x690")
         self.minsize(980, 600)
 
