@@ -1,34 +1,41 @@
-import sys, subprocess, importlib
+import os, sys, subprocess, shutil
 
-def ensure_pip():
+def _in_venv():
+    return sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+
+def _ensure_tk():
     try:
-        import pip  # noqa
-    except ImportError:
-        subprocess.check_call([sys.executable, "-m", "ensurepip", "--user"])
+        import tkinter  # noqa
+        return True
+    except Exception:
+        print("❌ Tkinter não encontrado. Instale com: sudo apt install -y python3-tk")
+        return False
 
-def install_and_import(pkg, pypi=None):
-    try:
-        return importlib.import_module(pkg)
-    except ImportError:
-        name = pypi or pkg
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "--user", "--quiet", name])
-        return importlib.import_module(pkg)
+venv_dir = os.path.expanduser("~/Persistent/venvs/whatsapp_gui")
+if not _in_venv():
+    if not _ensure_tk():
+        sys.exit(1)
+    py = shutil.which("python3") or sys.executable
+    if not os.path.exists(venv_dir):
+        subprocess.check_call([py, "-m", "venv", venv_dir])
+    pip = os.path.join(venv_dir, "bin", "pip")
+    subprocess.check_call([os.path.join(venv_dir, "bin", "python"), "-m", "pip", "install", "--upgrade", "pip"])
+    subprocess.check_call([pip, "install", "customtkinter", "pandas", "requests"])
+    os.execv(os.path.join(venv_dir, "bin", "python"), [os.path.join(venv_dir, "bin", "python")] + sys.argv)
 
-ensure_pip()
-ctk = install_and_import("customtkinter")
-pd = install_and_import("pandas")
-requests = install_and_import("requests")
-
+import customtkinter as ctk
 import tkinter as tk
 from tkinter import filedialog
 import threading
 import json
-import os
+import pandas as pd
+import requests
+import time
+import uuid
 import random
 import string
-import uuid
+import os
 from concurrent.futures import ThreadPoolExecutor
-import time
 
 BM_FILE = 'bms.json'
 LOG_FILE = 'sent_log.csv'
@@ -37,9 +44,8 @@ TOR_PROXY = {"http": "socks5h://127.0.0.1:9050", "https": "socks5h://127.0.0.1:9
 LOCK = threading.Lock()
 
 def random_namespace():
-    u = str(uuid.uuid4())
-    p = u.split('-')
-    return f"{p[0]}_{p[1]}_{p[2]}_{p[3]}_{p[4]}"
+    u = str(uuid.uuid4()).split('-')
+    return f"{u[0]}_{u[1]}_{u[2]}_{u[3]}_{u[4]}"
 
 def random_parameter_name(length=6):
     return random.choice(string.ascii_lowercase) + ''.join(random.choices(string.ascii_lowercase + string.digits, k=length-1))
@@ -105,8 +111,7 @@ class ParamRow(ctk.CTkFrame):
             if not pn:
                 return None
             param_name = pn
-        stype = self.source_type.get()
-        if stype == "Coluna":
+        if self.source_type.get() == "Coluna":
             col = self.col_combo.get().strip()
             if not col:
                 return None
@@ -289,7 +294,6 @@ class App(ctk.CTk):
         ctk.CTkLabel(win, text="Templates (vírgula):").pack(pady=(10,4), anchor="w", padx=12)
         temps_e = ctk.CTkEntry(win, placeholder_text="ex: aviso_1, aviso_2")
         temps_e.pack(pady=4, padx=12, fill="x")
-
         def save():
             name = name_e.get().strip()
             phone = phone_e.get().strip()
@@ -306,7 +310,6 @@ class App(ctk.CTk):
             self._select_bm(name)
             win.destroy()
             self._log(f"✅ BM '{name}' salva.")
-
         ctk.CTkButton(win, text="Salvar", command=save).pack(pady=16, padx=12, fill="x")
 
     def _pick_csv(self):
