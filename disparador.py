@@ -1,27 +1,51 @@
-import os, sys, subprocess, shutil
+import os, sys, subprocess, shutil, urllib.request
 
-def _in_venv():
+VENV_DIR = os.path.expanduser("~/Persistent/venvs/whatsapp_gui")
+
+def em_venv():
     return sys.prefix != getattr(sys, "base_prefix", sys.prefix)
 
-def _ensure_tk():
+def tem_tk():
     try:
-        import tkinter  # noqa
+        import tkinter
         return True
     except Exception:
-        print("❌ Tkinter não encontrado. Instale com: sudo apt install -y python3-tk")
+        print("❌ Tkinter ausente. Instale: sudo apt install -y python3-tk")
         return False
 
-venv_dir = os.path.expanduser("~/Persistent/venvs/whatsapp_gui")
-if not _in_venv():
-    if not _ensure_tk():
+def instalar_pip(py_exe):
+    try:
+        subprocess.check_call([py_exe, "-m", "ensurepip", "--upgrade", "--default-pip"])
+        return
+    except Exception:
+        pass
+    url = "https://bootstrap.pypa.io/get-pip.py"
+    destino = "/tmp/get-pip.py"
+    urllib.request.urlretrieve(url, destino)
+    try:
+        subprocess.check_call([py_exe, destino])
+    finally:
+        if os.path.exists(destino):
+            os.remove(destino)
+
+if not em_venv():
+    if not tem_tk():
         sys.exit(1)
     py = shutil.which("python3") or sys.executable
-    if not os.path.exists(venv_dir):
-        subprocess.check_call([py, "-m", "venv", venv_dir])
-    pip = os.path.join(venv_dir, "bin", "pip")
-    subprocess.check_call([os.path.join(venv_dir, "bin", "python"), "-m", "pip", "install", "--upgrade", "pip"])
-    subprocess.check_call([pip, "install", "customtkinter", "pandas", "requests"])
-    os.execv(os.path.join(venv_dir, "bin", "python"), [os.path.join(venv_dir, "bin", "python")] + sys.argv)
+    if not os.path.exists(VENV_DIR):
+        try:
+            subprocess.check_call([py, "-m", "venv", VENV_DIR])
+        except subprocess.CalledProcessError:
+            subprocess.check_call([py, "-m", "venv", VENV_DIR, "--without-pip"])
+    vpy = os.path.join(VENV_DIR, "bin", "python")
+    vpip = os.path.join(VENV_DIR, "bin", "pip")
+    try:
+        subprocess.check_call([vpy, "-m", "pip", "--version"])
+    except Exception:
+        instalar_pip(vpy)
+    subprocess.check_call([vpy, "-m", "pip", "install", "--upgrade", "pip"])
+    subprocess.check_call([vpip, "install", "customtkinter", "pandas", "requests"])
+    os.execv(vpy, [vpy] + sys.argv)
 
 import customtkinter as ctk
 import tkinter as tk
@@ -34,7 +58,6 @@ import time
 import uuid
 import random
 import string
-import os
 from concurrent.futures import ThreadPoolExecutor
 
 BM_FILE = 'bms.json'
